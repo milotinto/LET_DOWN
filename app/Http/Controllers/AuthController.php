@@ -5,9 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Tymon\JWTAuth\Exceptions\JWTException;
+use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends Controller
 {
+
+    public function __construct()
+    {
+        $this->middleware('jwt', ['except' => ['login', 'register']]);
+    }
         /**
      * Display a listing of the resource.
      */
@@ -19,101 +26,160 @@ class AuthController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function register(Request $request)
     {   
-        $inputs = $request-> input();
-        $inputs ["password"] = Hash::make (trim($request->password));
-        if ($respuesta = User::create($inputs)){
-        return response()->json([
-            'datos'=>$respuesta,
-            'mensaje:'=>'Proceso exitoso, usuario registrado correctamente.'
+
+        $this->validate($request,[
+            'nombre'=>'required|max:25',
+            'telefono'=>'required|max:15',
+            'email'=>'required|email|max:25|unique:users',
+            'password'=>'required|max:20|confirmed'
         ]);
-    }else{
+        $user = User::create([
+            'nombre'=>$request->nombre,
+            'telefono'=>$request->telefono,
+            'email'=>$request->email,
+            'password'=> Hash::make (trim($request->password))
+        ]);
         return response()->json([
-            'Error:'=>true,
-            'mensaje:'=>'Error, el usuario no ha sido registrado correctamente.'
+            'datos'=>$user,
+            'proceso'=>'Proceso realizado con éxito'
         ]);
     }
+    
+    public function login()
+    {
+        $credentials = request(['email', 'password']);
+
+        if (!$token = auth()->attempt($credentials)) {
+            return response()->json(['Error:' => 'Token no permitido.'], 401);
+        }
+
+        return $this->respondWithToken($token);
+        return response()->json([
+            'Mensaje:' => 'Sesión iniciada correctamente.'
+        ]);
+    }
+
+
+    protected function respondWithToken($token)
+    {
+        return response()->json([
+            'access_token' => $token,
+            'token_type' => 'bearer',
+            'expires_in' => auth()->factory()->getTTL() * 60
+        ]);
+    }
+
+    public function me()
+    {
+        return response()->json(auth()->user());
     }
 
     /**
-     * Display the specified resource.
+     * Log the user out (Invalidate the token).
+     *
+     * @return \Illuminate\Http\JsonResponse
      */
-    public function show(string $id)
+    public function logout()
     {
-        $exists = User::find($id);
-        if(isset($exists)){
+        auth()->logout();
+
+        return response()->json(['message' => 'Cierre de sesión exitoso.']);
+    }
+
+
+    public function refresh()
+    {
+        return $this->respondWithToken(auth()->refresh());
+    }
+
+
+    public function update(Request $request, $id)
+    {
+        
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            
+           
+        } catch (JWTException $e) {
+            return response()->json(['error' => 'Token inválido'], 401);
+        }
+
+        if ($user->id != $id) {
+            return response()->json(['msg' => 'No puedes actualizar esa información.', 'user_id' => $user->id, 'id_url'=>$id], 403);
+            
+        }
+
+        // Validar la solicitud y actualizar la información del usuario aquí
+        $user = User::find($id);
+        $old_user = User::find($id);
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no encontrado'], 404);
+        }
+
+        $user->nombre = $request->nombre;
+        $user->telefono = $request->telefono;
+        $user->email = $request->email;
+        $user->password = $request->password;
+        $user->password = Hash::make (trim($request->password));
+        $user->save();
+
+        if ($user->save()){
             return response()->json([
-            'datos'=>$exists,
-            'mensaje:'=>'Proceso exitoso, usuario encontrado correctamente.'
+                'datos'=>$user,
+                'mensaje:'=>'Proceso exitoso, datos actualizados correctamente.',
+                'datos viejos'=>$old_user
             ]);
         }else{
             return response()->json([
-                'error:'=>true,
-                'mensaje:'=>'Proceso fallido, no se ha encontrado este usuario.'
+                'proceso:'=>false,
+                'mensaje:'=>'No se han actualizado los datos del usuario.'
             ]);
         }
+    
+        return response()->json([
+            'error:'=>true,
+            'mensaje:'=>'No existe el usuario.'
+        ]);
+    
+        
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, string $id)
-    {
-        $exists = User::find($id);
 
-        if(isset($exists)){
-            $exists->nombre = $request->nombre;
-            $exists->telefono = $request->telefono;
-            $exists->correo = $request->correo;
-            $exists->password = Hash::make ($request->password);
-            if ($exists->save()){
+
+    public function delete($id)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+        } catch (JWTException) {
+            return response()->json([
+                'msg' => 'Error, no puedes eliminar esa información.'
+            ]);
+        }
+
+        if ($user->id != $id) {
+            return response()->json(['msg' => 'No puedes eliminar esa información.', 'user_id' => $user->id, 'id_url' => $id], 403);
+        }
+
+        $user = User::find($id);
+        if (isset($user)) {
+            $respuesta = User::destroy($id);
+            JWTAuth::invalidate(JWTAuth::getToken());
+            if ($respuesta) {
                 return response()->json([
-                    'datos'=>$exists,
-                    'mensaje:'=>'Proceso exitoso, datos actualizados correctamente.'
+                    'msg:' => 'Usuario eliminado correctamente.'
                 ]);
-            }else{
+            } else {
                 return response()->json([
-                    'proceso:'=>false,
-                    'mensaje:'=>'No se han actualizado los datos del usuario.'
+                    'msg:' => 'No se ha eliminado el usuario.'
                 ]);
             }
-        }else{
+        } else {
             return response()->json([
-                'error:'=>true,
-                'mensaje:'=>'No existe el usuario.'
+                'msg:' => 'No existe el estudiante.'
             ]);
         }
     }
 
-
-    /*
-    DESACTIVAR UN USUARIO
-    */
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
-    {
-        $exists= User::find($id);
-        if(isset($exists)){
-            $resp = User::destroy($id);
-            if($resp){
-                return response()->json([
-                    'datos'=> $exists,
-                    'mensaje:'=> 'Usuario eliminado correctamente.'
-                    ]);
-                
-            }else{
-                return response()->json([
-                    'mensaje:'=> 'No se ha eliminado el usuario o no existe.'
-                ]);
-            }
-        }else{
-            return response()->json([
-                'error:' => 'Error, no existe el usuario #'.$id
-            ]);
-        }
-    }
 }

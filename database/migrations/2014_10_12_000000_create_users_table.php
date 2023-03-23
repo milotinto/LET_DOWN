@@ -15,7 +15,7 @@ return new class extends Migration
             $table->bigIncrements('id');
             $table->string('nombre');
             $table->string('telefono');
-            $table->string('correo')->unique();
+            $table->string('email')->unique();
             $table->timestamp('verificacion_correo')->nullable();
             $table->string('password');
             $table->rememberToken();
